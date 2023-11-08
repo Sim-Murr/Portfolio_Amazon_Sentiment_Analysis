@@ -1,0 +1,147 @@
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+from jupyterthemes import jtplot
+jtplot.style(theme='monokai',context='notebook',ticks=True,grid=False)
+import os, ssl
+
+# This bit of code was used so I could open my file #
+if (not os.environ.get('PYTHONHTTPSVERIFY', '') and
+getattr(ssl, '_create_unverified_context', None)):
+    ssl._create_default_https_context = ssl._create_unverified_context
+
+# Creating a Data Frame from the Amazon File #
+a_df = pd.read_csv('amazon_alexa.tsv',sep='\t')
+
+# This was so I could see all the names of the columns
+pd.options.display.width = 0
+print(a_df.columns)
+
+# Need: verified_reviews (actual words), feedback (0 or 1)
+print(a_df['verified_reviews'].head(10))
+
+# Didn't need the dates or variation columns #
+a_df = a_df.drop(['date'], axis=1)
+a_df = a_df.drop(['variation'], axis=1)
+
+# Checked for any null values #
+sns.heatmap(a_df.isnull(), yticklabels=False, cbar=False)
+a_df.hist(bins=30, figsize=(13,5), color='pink')
+# feedback is mostly 1s, so it's good, rating is mostly 5s
+
+# Looked up the null values this way as well #
+print(a_df.isnull().sum())
+
+# Located one null value and filled it #
+most = a_df.mode().iloc[0]
+a_df.fillna(most, inplace=True)
+
+# Did some investigating #
+print(a_df.info())
+a_df['length'] = a_df['verified_reviews'].apply(len)
+print(a_df.describe())
+
+print(a_df[a_df['length'] == 132]['verified_reviews'].iloc[0])
+a_df['length'].plot(bins=100, kind='hist', color='pink')
+
+sns.countplot(x=a_df['rating'], label="Count")
+sns.countplot(x=a_df['feedback'], label="Count")
+
+
+# PLOT THE WORD CLOUD - to visualize the negative and positive words #
+positive = a_df[a_df['feedback']==1]
+print(positive)
+
+negative = a_df[a_df['feedback']==0]
+print(negative)
+
+sentences = a_df['verified_reviews'].tolist()
+sent_as_one_string = ' '.join(sentences)
+
+from wordcloud import WordCloud
+plt.figure(figsize=(10,10))
+plt.imshow(WordCloud().generate(sent_as_one_string))
+
+neg_sent = negative['verified_reviews'].tolist()
+negative_sent_as_one_string = " ".join(neg_sent)
+plt.figure(figsize=(10,10))
+plt.imshow(WordCloud().generate(negative_sent_as_one_string))
+
+pos_sent = positive['verified_reviews'].tolist()
+positive_sent_as_one_string = " ".join(pos_sent)
+plt.figure(figsize=(10,10))
+plt.imshow(WordCloud().generate(positive_sent_as_one_string))
+
+import string
+string.punctuation
+
+import nltk 
+from nltk.corpus import stopwords
+
+# I had to download stopwords package to execute this command #
+nltk.download('stopwords')
+stopwords.words('english')
+
+# Created a function to streamline the process #
+
+def review_cleaning(review):
+    punc_removal = [char for char in review if char not in string.punctuation]
+    punc_removal_join = ''.join(punc_removal)
+    punc_removal_join_clean = [word for word in punc_removal_join.split() if word.lower() not in stopwords.words('english')]
+    return punc_removal_join_clean
+
+a_df_clean = a_df['verified_reviews'].apply(review_cleaning) # works now
+
+from sklearn.feature_extraction.text import CountVectorizer
+
+vectorizer = CountVectorizer(analyzer= review_cleaning, dtype= np.uint8) # this dtype changes it to an 8-bit so it's not huge
+review_countvectorizer = vectorizer.fit_transform(a_df['verified_reviews'])
+
+print(vectorizer.get_feature_names_out()) # to get every unique word in the entire dataset
+print(review_countvectorizer.toarray()) # to get my array
+print(review_countvectorizer.shape)
+
+# Finally creating the machine learning model #
+X = pd.DataFrame(review_countvectorizer.toarray())
+y = a_df['feedback']
+print(X.shape, y.shape)
+
+from sklearn.model_selection import train_test_split
+from sklearn.naive_bayes import MultinomialNB
+from sklearn.metrics import classification_report, confusion_matrix
+
+# Split the data into training and test sets
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2)
+
+NB_classifier = MultinomialNB()
+NB_classifier.fit(X_train, y_train)
+
+y_predict_test = NB_classifier.predict(X_test)
+cm = confusion_matrix(y_test, y_predict_test)
+sns.heatmap(cm, annot=True) # the numbers are the number of samples
+print(classification_report(y_test, y_predict_test))
+
+
+# Tried different models #
+
+from sklearn.linear_model import LogisticRegression
+model = LogisticRegression()
+model.fit(X_train, y_train)
+
+y_pred = model.predict(X_test)
+cm2 = confusion_matrix(y_pred, y_test)
+sns.heatmap(cm2, annot = True)
+print(classification_report(y_test, y_pred))
+
+
+from sklearn.ensemble import GradientBoostingClassifier
+model2 = GradientBoostingClassifier()
+model2.fit(X_train, y_train)
+
+y_pred2 = model2.predict(X_test)
+cm3 = confusion_matrix(y_pred2, y_test)
+sns.heatmap(cm3, annot = True)
+print(classification_report(y_test, y_pred2))
+
+plt.show()
